@@ -105,11 +105,12 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         ('account', ''),
         ('usr', ''),
         ('pwd', ''),
-        ('practice', True)
+        ('practice', True),
+        ('account_tmout', 10.0),  # account balance refresh timeout
     )
 
-    _ENVPRACTICE = 'demo'
-    _ENVLIVE = 'live'
+    _ENVPRACTICE = 'DEMO'
+    _ENVLIVE = 'LIVE'
 
     _ORDEREXECS = {
         bt.Order.Market: 'TODO',
@@ -147,6 +148,9 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         self._oenv = self._ENVPRACTICE if self.p.practice else self._ENVLIVE
 
         self.igapi = IGService(self.p.usr, self.p.pwd, self.p.token, self._oenv)
+        self.igapi.create_session()
+        #Work with JSON rather than Pandas for better backtrader integration
+        self.igapi.return_dataframe = False
         self._cash = 0.0
         self._value = 0.0
         self._evt_acct = threading.Event()
@@ -176,7 +180,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
     def get_cash(self):
         #TODO - Check where we
-        self._value
+        return self._cash
 
     def get_notifications(self):
         '''Return the pending "store" notifications'''
@@ -187,7 +191,10 @@ class IGStore(with_metaclass(MetaSingleton, object)):
     def get_positions(self):
         #TODO - Get postion info from returned object.
         positions = self.igapi.fetch_open_positions()
-        return positions
+        return positions['positions']
+
+    def get_value(self):
+        return self._value
 
     def put_notification(self, msg, *args, **kwargs):
         self.notifs.append((msg, args, kwargs))
@@ -245,6 +252,9 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
     def _process_transaction(self, oid, trans):
         #TODO
+        pass
+
+    def streaming_events(self, tmout=None):
         pass
 
     def _t_streaming_prices(self, dataname, q, tmout):

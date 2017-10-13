@@ -75,16 +75,13 @@ class IGBroker(with_metaclass(MetaIGBroker, BrokerBase)):
 
         if self.p.use_positions:
             for p in self.o.get_positions():
-                #TODO
-                '''
-                print('position for instrument:', p['instrument'])
-                is_sell = p['side'] == 'sell'
-                size = p['units']
+                print('position for instrument:', p['market']['epic'])
+                is_sell = p['position']['direction'] == 'SELL'
+                size = p['position']['dealSize']
                 if is_sell:
                     size = -size
-                price = p['avgPrice']
-                self.positions[p['instrument']] = Position(size, price)
-                '''
+                price = p['position']['openLevel']
+                self.positions[p['market']['epic']] = Position(size, price)
 
 
     def data_started(self, data):

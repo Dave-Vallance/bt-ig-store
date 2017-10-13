@@ -32,6 +32,7 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
     params = (
         ('useask', False),
         ('reconnections', -1),
+        ('qcheck', 5)
     )
 
     # States for the Finite State Machine in _load
@@ -127,6 +128,11 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
 
                 #TODO handle error messages in feed
 
+
+                #Check for empty data. Sometimes all the fields return None...
+                if msg['UTM'] is None:
+                    return None
+
                 #self._reconns = self.p.reconnections
 
                 # Process the message according to expected return type
@@ -155,9 +161,9 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
             #   - Set Dissonnected status where appropriate.
 
 
-
-
     def _load_tick(self, msg):
+        #print('MSG = {}'.format(msg))
+        #print(msg['UTM'])
         dtobj = datetime.utcfromtimestamp(int(msg['UTM']) / 1000)
         dt = date2num(dtobj)
 
