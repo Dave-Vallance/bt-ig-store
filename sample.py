@@ -1,8 +1,8 @@
 import backtrader as bt
 from datetime import datetime
 import logging
-from extensions.stores.ig.igstore import IGStore
-from extensions.stores.ig.igdata import IGData
+from bt_ig import IGStore
+from bt_ig import IGData 
 
 
 api_key = 'INSERT YOUR API KEY'

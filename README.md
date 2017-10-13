@@ -36,8 +36,7 @@ import backtrader as bt
 from datetime import datetime
 import logging
 from bt_ig import IGStore
-from bt_ig import IGData
-
+from bt_ig import IGData 
 
 api_key = 'INSERT YOUR API KEY'
 usr = 'INSERT YOUR USERNAME'
@@ -71,8 +70,11 @@ tframes = dict(
 #Create an instance of cerebro
 cerebro = bt.Cerebro()
 
-#Setup Oanda
-igs = IGStore(usr=usr, pwd=pwd, token=api_key, account=acc)
+#Setup IG
+igs = IGStore(usr=usr, pwd=pwd, token=api_key, account=sbet)
+broker = igs.getbroker()
+cerebro.setbroker(broker)
+
 
 data = igs.getdata(dataname='CS.D.GBPUSD.TODAY.IP')
 #Replay the data in forward test envirnoment so we can act quicker
