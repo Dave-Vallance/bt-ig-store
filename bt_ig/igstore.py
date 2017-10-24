@@ -105,6 +105,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         ('account', ''),
         ('usr', ''),
         ('pwd', ''),
+        ('currency_code', 'GBP'), #The currency code of the account
         ('practice', True),
         ('account_tmout', 10.0),  # account balance refresh timeout
     )
@@ -113,7 +114,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
     _ENVLIVE = 'LIVE'
 
     _ORDEREXECS = {
-        bt.Order.Market: 'TODO',
+        bt.Order.Market: 'MARKET',
         bt.Order.Limit: 'TODO',
         bt.Order.Stop: 'TODO',
         bt.Order.StopLimit: 'TODO',
@@ -187,7 +188,6 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         self.notifs.append(None)  # put a mark / threads could still append
         return [x for x in iter(self.notifs.popleft, None)]
 
-
     def get_positions(self):
         #TODO - Get postion info from returned object.
         positions = self.igapi.fetch_open_positions()
@@ -225,7 +225,6 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             self.q_orderclose.put(None)
             self.q_account.put(None)
 
-
     '''
     Loads of methods to add in-between
     '''
@@ -242,17 +241,111 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         #TODO
         pass
 
+    def order_create(self, order, stopside=None, takeside=None, **kwargs):
+        okwargs = dict()
+        okwargs['currency_code'] = self.p.currency_code
+        #okwargs['dealReference'] = order.ref
+        okwargs['epic'] = order.data._dataname
+        okwargs['size'] = abs(order.created.size)
+        okwargs['direction'] = 'BUY' if order.isbuy() else 'SELL'
+        okwargs['order_type'] = self._ORDEREXECS[order.exectype]
+        #TODO have these two as parameters and init options.
+        okwargs['guaranteed_stop'] = "false"
+        #okwargs['timeInForece'] = 'FILL_OR_KILL'
+        okwargs['quote_id'] = None
+        okwargs['force_open']= "false"
+
+        #Filler - required arguments can update later if Limit order is required
+        okwargs['level'] = None
+        okwargs['limit_level'] = None
+        okwargs['limit_distance'] = None
+        okwargs['stop_level'] = None
+        okwargs['stop_distance'] = None
+        okwargs['expiry'] = 'DFB'
+
+        if order.exectype == bt.Order.StopLimit:
+            okwargs['lowerBound'] = order.created.pricelimit
+            okwargs['upperBound'] = order.created.pricelimit
+
+        if order.exectype == bt.Order.StopTrail:
+            #TODO need to figure out how to get the stop distance and increment
+            #from the trail amount.
+            print('order trail amount: {}'.format(order.trailamount))
+            okwargs['stop_distance'] = order.trailamount
+            #okwargs['trailingStopIncrement'] = 'TODO!'
+
+        if stopside is not None:
+            okwargs['stop_level'] = stopside.price
+
+        if takeside is not None:
+            okwargs['limit_level'] = takeside.price
+
+        okwargs.update(**kwargs)  # anything from the user
+
+        self.q_ordercreate.put((order.ref, okwargs,))
+        return order
+
     def _t_order_cancel(self):
-        #TODO
-        pass
+        while True:
+            oref = self.q_orderclose.get()
+            if oref is None:
+                break
+
+            oid = self._orders.get(oref, None)
+            if oid is None:
+                continue  # the order is no longer there
+            try:
+                o = self.igapi.delete_working_order(oid)
+            except Exception as e:
+                continue  # not cancelled - FIXME: notify
+
+            self.broker._cancel(oref)
 
     def _t_order_create(self):
-        #TODO
-        pass
+        while True:
+            msg = self.q_ordercreate.get()
+            if msg is None:
+                break
 
-    def _process_transaction(self, oid, trans):
-        #TODO
-        pass
+            oref, okwargs = msg
+            try:
+
+                #NOTE The IG API will confirm the deal automatically with the
+                #create_open_position call. Therefore if no error is returned here
+                #Then it was accepted and open.
+                o = self.igapi.create_open_position(**okwargs)
+            except Exception as e:
+                self.put_notification(e)
+                self.broker._reject(order.ref)
+                return
+
+            # Ids are delivered in different fields and all must be fetched to
+            # match them (as executions) to the order generated here
+            _o = {'dealId': None}
+            oids = list()
+
+            oids.append(o['dealId'])
+
+            #print('_t_order_create Deal ID = {}'.format(o['dealId']))
+            if o['dealStatus'] == 'REJECTED':
+                self.broker._reject(oref)
+                self.put_notification(o['reason'])
+
+            if not oids:
+                self.broker._reject(oref)
+                return
+
+            self._orders[oref] = oids[0]
+
+            #Send the summission notification
+            #TODO Shouldn't this come earlier????
+            self.broker._submit(oref)
+
+            if okwargs['order_type'] == 'MARKET':
+                self.broker._accept(oref)  # taken immediately
+                self.broker._fill(oref, o['size'], o['level'], okwargs['order_type'])
+            for oid in oids:
+                self._ordersrev[oid] = oref  # maps ids to backtrader order
 
     def streaming_events(self, tmout=None):
         pass
