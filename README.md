@@ -79,7 +79,7 @@ tframes = dict(
 cerebro = bt.Cerebro()
 
 #Setup IG
-igs = IGStore(usr=usr, pwd=pwd, token=api_key, account=sbet)
+igs = IGStore(usr=usr, pwd=pwd, token=api_key, account=acc)
 broker = igs.getbroker()
 cerebro.setbroker(broker)
 
