@@ -26,8 +26,16 @@ Python Backtesting library for trading strategies
 
 ## Current Functionality
 
-- basic instrument streaming
+- __*basic*__ instrument streaming
+- __*New:*__ IG Broker: Performs the open position check when initialized to track existing positions
+- __*New:*__ Opening and closing of simple Market orders using the self.buy() and self.close() is now supported.
+- __*New:*__ Set IG currency code as a store initialization parameter (Default GBP).
 
+##Known Issues
+
+On my MAC i get a 'fund mode' attribute error from the broker observer when running cerebro.
+Oddly enough on my Windows work machine, this does not happen. If you try to run the store
+and get a similar error, cerebro needs to be initialized with `stdstats=false` for now until I fix it.
 
 ## Streaming Example
 
@@ -36,7 +44,7 @@ import backtrader as bt
 from datetime import datetime
 import logging
 from bt_ig import IGStore
-from bt_ig import IGData 
+from bt_ig import IGData
 
 api_key = 'INSERT YOUR API KEY'
 usr = 'INSERT YOUR USERNAME'
