@@ -35,7 +35,7 @@ Python Backtesting library for trading strategies
 can now all be passed as key word arguments during order creation and handled
 appropriately. Defaults are used where no kwarg is passed.
 
-##Known Issues
+## Known Issues
 
 See the issues tab: https://github.com/Dave-Vallance/bt-ig-store/issues
 
