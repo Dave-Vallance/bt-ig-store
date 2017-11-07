@@ -23,19 +23,26 @@ Python Backtesting library for trading strategies
 
 - http://pandas.pydata.org/
 
-
 ## Current Functionality
 
-- __*basic*__ instrument streaming
-- __*New:*__ IG Broker: Performs the open position check when initialized to track existing positions
-- __*New:*__ Opening and closing of simple Market orders using the self.buy() and self.close() is now supported.
-- __*New:*__ Set IG currency code as a store initialization parameter (Default GBP).
+- Basic instrument streaming
+- Performs the open position check when initialized to track existing positions
+- Opening and closing of simple Market orders using the self.buy() and self.close() is now supported.
+- Set IG currency code as a store initialization parameter (Default GBP).
+- __*New:*__ Stop order creation and cancellation supported.
+- __*New:*__ Limit order creation and cancellation supported.
+- __*New:*__ expiry, guaranteed_stop, time_in_force, and good_till_date parameters
+can now all be passed as key word arguments during order creation and handled
+appropriately. Defaults are used where no kwarg is passed.
 
 ##Known Issues
 
-On my MAC i get a 'fund mode' attribute error from the broker observer when running cerebro.
-Oddly enough on my Windows work machine, this does not happen. If you try to run the store
-and get a similar error, cerebro needs to be initialized with `stdstats=false` for now until I fix it.
+See the issues tab: https://github.com/Dave-Vallance/bt-ig-store/issues
+
+__Value for header {Version: 2} must be of type str or bytes, not <class 'int'>__
+
+This issue is documented in the issues tab. If you see it, you should make sure you
+have the latest trading_ig module code.
 
 ## Streaming Example
 

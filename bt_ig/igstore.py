@@ -34,9 +34,16 @@ from backtrader.metabase import MetaParams
 from backtrader.utils.py3 import queue, with_metaclass
 from backtrader.utils import AutoDict
 
+
 #IG Imports
 from trading_ig import (IGService, IGStreamService)
 from trading_ig.lightstreamer import Subscription
+
+'''
+#Dev IG Imports
+from ...dev.trading_ig import (IGService, IGStreamService)
+from ...dev.trading_ig.lightstreamer import Subscription
+'''
 
 
 #TODO ADD Errors if appropriate
@@ -115,8 +122,8 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
     _ORDEREXECS = {
         bt.Order.Market: 'MARKET',
-        bt.Order.Limit: 'TODO',
-        bt.Order.Stop: 'TODO',
+        bt.Order.Limit: 'LIMIT',
+        bt.Order.Stop: 'STOP',
         bt.Order.StopLimit: 'TODO',
     }
 
@@ -242,28 +249,76 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         pass
 
     def order_create(self, order, stopside=None, takeside=None, **kwargs):
+        '''
+        additional kwargs
+
+        expiry: Sting, default = 'DFB' Other examples could be 'DEC-14'. Check
+        the instrument details through IG to find out the correct expiry.
+
+        guaranteed_stop: Bool, default = False. Sets whether or not to use a
+        guranteed stop.
+
+        time_in_force: String. Must be either 'GOOD_TILL_CANCELLED' or "GOOD_TILL_DATE"
+
+        good_till_date: Datetime object. Must be provided is "GOOD_TILL_DATE" is set.
+        '''
         okwargs = dict()
         okwargs['currency_code'] = self.p.currency_code
         #okwargs['dealReference'] = order.ref
         okwargs['epic'] = order.data._dataname
+        #Size must be positive for both buy and sell orders
         okwargs['size'] = abs(order.created.size)
         okwargs['direction'] = 'BUY' if order.isbuy() else 'SELL'
         okwargs['order_type'] = self._ORDEREXECS[order.exectype]
-        #TODO have these two as parameters and init options.
-        okwargs['guaranteed_stop'] = "false"
-        #okwargs['timeInForece'] = 'FILL_OR_KILL'
-        okwargs['quote_id'] = None
+        #TODO FILL_OR_KILL
+        #okwargs['timeInForce'] = 'FILL_OR_KILL'
         okwargs['force_open']= "false"
 
         #Filler - required arguments can update later if Limit order is required
-        okwargs['level'] = None
+        okwargs['level'] = order.created.price
         okwargs['limit_level'] = None
         okwargs['limit_distance'] = None
         okwargs['stop_level'] = None
         okwargs['stop_distance'] = None
-        okwargs['expiry'] = 'DFB'
+        #Allow users to set the expiry through kwargs
+        if 'expiry' in kwargs:
+            okwargs['expiry'] = kwargs["expiry"]
+        else:
+            okwargs['expiry'] = 'DFB'
+        #Allow users to set the a guaranteed stop
+        #Convert from boolean value to string.
+        if 'guaranteed_stop' in kwargs:
+            if kwargs['guaranteed_stop'] == True:
+                okwargs['guaranteed_stop'] = "true"
+            elif kwargs['guaranteed_stop'] == False:
+                okwargs['guaranteed_stop'] = "false"
+            else:
+                raise ValueError('guaranteed_stop must be a boolean value: "{}" '
+                'was entered'.format(kwargs['guaranteed_stop']))
+        else:
+            okwargs['guaranteed_stop'] = "false"
+
+        #Market orders use an 'order_type' keyword. Limit and stop orders use 'type'
+        if order.exectype == bt.Order.Market:
+            okwargs['quote_id'] = None
+
+        if order.exectype in [bt.Order.Stop, bt.Order.Limit]:
+
+            #Allow passing of a timeInForce kwarg
+            if 'time_in_force' in kwargs:
+                okwargs['time_in_force'] = kwargs['time_in_force']
+                if kwargs['time_in_force'] == 'GOOD_TILL_DATE':
+                    if 'good_till_date' in kwargs:
+                        #Trading_IG will do a datetime conversion
+                        okwargs['good_till_date'] = kwargs['good_till_date']
+                    else:
+                        raise ValueError('If timeInForce == GOOD_TILL_DATE, a '
+                        'goodTillDate datetime kwarg must be provided.')
+            else:
+                okwargs['time_in_force'] = 'GOOD_TILL_CANCELLED'
 
         if order.exectype == bt.Order.StopLimit:
+            #TODO
             okwargs['lowerBound'] = order.created.pricelimit
             okwargs['upperBound'] = order.created.pricelimit
 
@@ -283,6 +338,10 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         okwargs.update(**kwargs)  # anything from the user
 
         self.q_ordercreate.put((order.ref, okwargs,))
+        return order
+
+    def order_cancel(self, order):
+        self.q_orderclose.put(order.ref)
         return order
 
     def _t_order_cancel(self):
@@ -308,16 +367,33 @@ class IGStore(with_metaclass(MetaSingleton, object)):
                 break
 
             oref, okwargs = msg
-            try:
+            #Check to see if it is a market order or working order.
+            #Market orders have an 'order_type' kwarg. Working orders
+            #use the 'type' kwarg for setting stop or limit
+            if okwargs['order_type'] == 'MARKET':
+                try:
 
-                #NOTE The IG API will confirm the deal automatically with the
-                #create_open_position call. Therefore if no error is returned here
-                #Then it was accepted and open.
-                o = self.igapi.create_open_position(**okwargs)
-            except Exception as e:
-                self.put_notification(e)
-                self.broker._reject(order.ref)
-                return
+                    #NOTE The IG API will confirm the deal automatically with the
+                    #create_open_position call. Therefore if no error is returned here
+                    #Then it was accepted and open.
+                    o = self.igapi.create_open_position(**okwargs)
+                except Exception as e:
+                    self.put_notification(e)
+                    self.broker._reject(oref)
+                    return
+
+            else:
+                print('Creating Working Order')
+                try:
+                    o = self.igapi.create_working_order(**okwargs)
+
+                except Exception as e:
+                    print(e)
+                    self.put_notification(e)
+                    self.broker._reject(oref)
+                    return
+
+
 
             # Ids are delivered in different fields and all must be fetched to
             # match them (as executions) to the order generated here
