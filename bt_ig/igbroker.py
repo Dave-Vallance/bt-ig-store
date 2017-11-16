@@ -75,6 +75,7 @@ class IGBroker(with_metaclass(MetaIGBroker, BrokerBase)):
 
         if self.p.use_positions:
             for p in self.o.get_positions():
+                # TODO This should be a store notification
                 print('position for instrument:', p['market']['epic'])
                 is_sell = p['position']['direction'] == 'SELL'
                 size = p['position']['dealSize']

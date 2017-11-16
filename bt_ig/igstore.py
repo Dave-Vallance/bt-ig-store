@@ -15,6 +15,12 @@ I need to implement
 1) IG Feed - Look at bt/feeds/oanda.py for an Example. It seems the feed
 imports and has many references to the store.
 
+
+NEW - Improved streamer setup. Can use the same streamer for multiple get_instruments r
+rather than creating multiple streamers
+NEW - Manual pull of cash and value
+NEW - Account cash and value live streaming
+FIX - Level Set during order creation caused MARKET Orders to be rejected.
 '''
 
 #Python Imports
@@ -54,18 +60,28 @@ class Streamer(IGStreamService):
     TODO
         - Boatloads!
         - Add a listener for notifiactions
+        - add methods to set queues for account and prices
     '''
-    def __init__(self, q, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(Streamer, self).__init__(*args, **kwargs)
-
-        #q is an actual queue
-        self.q = q
+        self.price_q = dict()
 
     def run(self, params):
 
         self.connected = True
         #params = params or {}
 
+    def set_price_q(self, q, epic):
+        self.price_q[epic] = q
+
+    def set_account_q(self, q):
+        self.account_q = q
+
+    def on_account_update(self,data):
+        '''
+        Listener for account updates
+        '''
+        self.account_q.put(data['values'])
 
     def on_prices_update(self, data):
         '''
@@ -73,7 +89,10 @@ class Streamer(IGStreamService):
 
         For IG, we register the on_prices_update listener.
         '''
-        self.q.put(data['values'])
+        name = data['name']
+        epic = name.replace('CHART:','')
+        epic = epic.replace(':TICK','')
+        self.price_q[epic].put(data['values'])
 
     def on_error(self,data):
 
@@ -157,19 +176,30 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
         self.igapi = IGService(self.p.usr, self.p.pwd, self.p.token, self._oenv)
         self.igapi.create_session()
+
+        self.igss = Streamer(ig_service=self.igapi)
+        self.ig_session = self.igss.create_session()
+        self.igss.connect(self.p.account)
         #Work with JSON rather than Pandas for better backtrader integration
         self.igapi.return_dataframe = False
         self._cash = 0.0
         self._value = 0.0
+        self.pull_cash_and_value()
         self._evt_acct = threading.Event()
 
     def broker_threads(self):
         '''
         Setting up threads and targets for broker related notifications.
         '''
+
         self.q_account = queue.Queue()
+        kwargs = {'q': self.q_account}
         self.q_account.put(True)  # force an immediate update
         t = threading.Thread(target=self._t_account)
+        t.daemon = True
+        t.start()
+
+        t = threading.Thread(target=self._t_account_events, kwargs=kwargs)
         t.daemon = True
         t.start()
 
@@ -185,6 +215,17 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
         # Wait once for the values to be set
         self._evt_acct.wait(self.p.account_tmout)
+
+    def pull_cash_and_value(self):
+        '''
+        Method to set the initial cash and value before streaming updates start.
+        '''
+        accounts = self.igapi.fetch_accounts()
+        for account in accounts['accounts']:
+            if self.p.account == account['accountId']:
+                self._cash = account['balance']['available']
+                self._value = account['balance']['balance']
+
 
     def get_cash(self):
         #TODO - Check where we
@@ -207,6 +248,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         self.notifs.append((msg, args, kwargs))
 
     def start(self, data=None, broker=None):
+
         # Datas require some processing to kickstart data reception
         if data is None and broker is None:
             self.cash = None
@@ -235,18 +277,31 @@ class IGStore(with_metaclass(MetaSingleton, object)):
     '''
     Loads of methods to add in-between
     '''
-    def streaming_prices(self, dataname, tmout=None):
-        q = queue.Queue()
-        kwargs = {'q': q, 'dataname': dataname, 'tmout': tmout}
-        t = threading.Thread(target=self._t_streaming_prices, kwargs=kwargs)
-        t.daemon = True
-        t.start()
-        return q
 
 
     def _t_account(self):
         #TODO
-        pass
+        '''
+        This is a thread with a queue that will extract data as it comes in
+        I need to pass the relavant account info here after subscribing to
+        the account information through lightstreamer
+        '''
+        while True:
+            try:
+                msg = self.q_account.get(timeout=self.p.account_tmout)
+                if msg is None:
+                    break  # end of thread
+                elif type(msg) != bool: #Check it is not the true value at the start of the queue... TODO improve this
+                    try:
+                        self._cash = float(msg["AVAILABLE_CASH"])
+                        self._value = float(msg["EQUITY"])
+                    except KeyError:
+                        pass
+
+            except queue.Empty:  # tmout -> time to refresh
+                pass
+
+            self._evt_acct.set()
 
     def order_create(self, order, stopside=None, takeside=None, **kwargs):
         '''
@@ -301,6 +356,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         #Market orders use an 'order_type' keyword. Limit and stop orders use 'type'
         if order.exectype == bt.Order.Market:
             okwargs['quote_id'] = None
+            okwargs['level'] = None #IG Does not allow a level to be set on market orders
 
         if order.exectype in [bt.Order.Stop, bt.Order.Limit]:
 
@@ -323,9 +379,9 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             okwargs['upperBound'] = order.created.pricelimit
 
         if order.exectype == bt.Order.StopTrail:
-            #TODO need to figure out how to get the stop distance and increment
-            #from the trail amount.
-            print('order trail amount: {}'.format(order.trailamount))
+            # TODO need to figure out how to get the stop distance and increment
+            # from the trail amount.
+            # print('order trail amount: {}'.format(order.trailamount))
             okwargs['stop_distance'] = order.trailamount
             #okwargs['trailingStopIncrement'] = 'TODO!'
 
@@ -365,11 +421,10 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             msg = self.q_ordercreate.get()
             if msg is None:
                 break
-
             oref, okwargs = msg
-            #Check to see if it is a market order or working order.
-            #Market orders have an 'order_type' kwarg. Working orders
-            #use the 'type' kwarg for setting stop or limit
+            # Check to see if it is a market order or working order.
+            # Market orders have an 'order_type' kwarg. Working orders
+            # use the 'type' kwarg for setting stop or limit
             if okwargs['order_type'] == 'MARKET':
                 try:
 
@@ -381,9 +436,8 @@ class IGStore(with_metaclass(MetaSingleton, object)):
                     self.put_notification(e)
                     self.broker._reject(oref)
                     return
-
             else:
-                print('Creating Working Order')
+                # print('Creating Working Order')
                 try:
                     o = self.igapi.create_working_order(**okwargs)
 
@@ -392,8 +446,6 @@ class IGStore(with_metaclass(MetaSingleton, object)):
                     self.put_notification(e)
                     self.broker._reject(oref)
                     return
-
-
 
             # Ids are delivered in different fields and all must be fetched to
             # match them (as executions) to the order generated here
@@ -423,8 +475,56 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             for oid in oids:
                 self._ordersrev[oid] = oref  # maps ids to backtrader order
 
+
+    def streaming_account(self, tmout=None):
+        '''
+        Added by me to create a subscription to account information such as
+        balance, equity funds, margin.
+        '''
+        q = queue.Queue()
+        kwargs = {'q': q, 'tmout': tmout}
+
+        t = threading.Thread(target=self._t_account_listener, kwargs=kwargs)
+        t.daemon = True
+        t.start()
+
+        t = threading.Thread(target=self._t_account_events, kwargs=kwargs)
+        t.daemon = True
+        t.start()
+        return q
+
+
+    def _t_account_events(self, q, tmout=None):
+        '''
+        Thread to create the subscription to account events.
+
+        Here we create a merge subscription for lightstreamer.
+        '''
+        self.igss.set_account_q(q)
+        # Making an other Subscription in MERGE mode
+        subscription_account = Subscription(
+            mode="MERGE",
+            items=['ACCOUNT:'+self.p.account],
+            fields=["AVAILABLE_CASH", "EQUITY"],
+            )
+        #    #adapter="QUOTE_ADAPTER")
+
+        # Adding the "on_balance_update" function to Subscription
+        subscription_account.addlistener(self.igss.on_account_update)
+
+        # Registering the Subscription
+        sub_key_account = self.igss.ls_client.subscribe(subscription_account)
+
     def streaming_events(self, tmout=None):
         pass
+
+    def streaming_prices(self, dataname, tmout=None):
+        q = queue.Queue()
+        kwargs = {'q': q, 'dataname': dataname, 'tmout': tmout}
+        t = threading.Thread(target=self._t_streaming_prices, kwargs=kwargs)
+        t.daemon = True
+        t.start()
+        return q
 
     def _t_streaming_prices(self, dataname, q, tmout):
         '''
@@ -433,9 +533,10 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         if tmout is not None:
             _time.sleep(tmout)
 
-        igss = Streamer(q, ig_service=self.igapi)
-        ig_session = igss.create_session()
-        igss.connect(self.p.account)
+        self.igss.set_price_q(q, dataname)
+        #igss = Streamer(q, ig_service=self.igapi)
+        #ig_session = igss.create_session()
+        #igss.connect(self.p.account)
 
         epic = 'CHART:'+dataname+':TICK'
         # Making a new Subscription in MERGE mode
@@ -447,6 +548,6 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             #adapter="QUOTE_ADAPTER")
 
         # Adding the "on_price_update" function to Subscription
-        subcription_prices.addlistener(igss.on_prices_update)
+        subcription_prices.addlistener(self.igss.on_prices_update)
 
-        sub_key_prices = igss.ls_client.subscribe(subcription_prices)
+        sub_key_prices = self.igss.ls_client.subscribe(subcription_prices)

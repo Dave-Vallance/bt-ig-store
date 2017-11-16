@@ -73,7 +73,7 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         self._reconns = 0
 
     def _st_start(self, instart=True, tmout=None):
-        #TODO Equivelent of streaming_prices
+        # streaming prices returns the same queue the streamer is using.
         self.qlive = self.o.streaming_prices(self.p.dataname, tmout=tmout)
 
         if self._statelivereconn:
