@@ -15,12 +15,6 @@ I need to implement
 1) IG Feed - Look at bt/feeds/oanda.py for an Example. It seems the feed
 imports and has many references to the store.
 
-
-NEW - Improved streamer setup. Can use the same streamer for multiple get_instruments r
-rather than creating multiple streamers
-NEW - Manual pull of cash and value
-NEW - Account cash and value live streaming
-FIX - Level Set during order creation caused MARKET Orders to be rejected.
 '''
 
 #Python Imports

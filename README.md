@@ -29,11 +29,13 @@ Python Backtesting library for trading strategies
 - Performs the open position check when initialized to track existing positions
 - Opening and closing of simple Market orders using the self.buy() and self.close() is now supported.
 - Set IG currency code as a store initialization parameter (Default GBP).
-- __*New:*__ Stop order creation and cancellation supported.
-- __*New:*__ Limit order creation and cancellation supported.
-- __*New:*__ expiry, guaranteed_stop, time_in_force, and good_till_date parameters
-can now all be passed as key word arguments during order creation and handled
-appropriately. Defaults are used where no kwarg is passed.
+-  Stop order creation and cancellation supported.
+-  Limit order creation and cancellation supported.
+-  expiry, guaranteed_stop, time_in_force, and good_till_date parameters
+- __*New:*__ Improved streamer setup. Can use the same streamer for multiple get_instruments rather than creating multiple streamers
+- __*New:*__ Manual pull of cash and value
+- __*New:*__ Account cash and value live streaming
+- __*FIX:*__ Level Set during order creation caused MARKET Orders to be rejected can now all be passed as key word arguments during order creation and handled appropriately. Defaults are used where no kwarg is passed.
 
 ## Known Issues
 
