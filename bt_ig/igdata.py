@@ -27,7 +27,9 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
     '''
     #TODO insert params
     params = (
+        ('historical', False),
         ('useask', False),
+        ('bidask', True),
         ('reconnections', -1),
         ('qcheck', 5)
     )
@@ -66,6 +68,13 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         # Kickstart store and get queue to wait on
         self.o.start(data=self)
 
+        # check if the granularity is supported
+        otf = self.o.get_granularity(self._timeframe, self._compression)
+        if otf is None:
+            self.put_notification(self.NOTSUPPORTED_TF)
+            self._state = self._ST_OVER
+            return
+
         self._start_finish()
         self._state = self._ST_START  # initial state for _load
         self._st_start()
@@ -73,6 +82,23 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         self._reconns = 0
 
     def _st_start(self, instart=True, tmout=None):
+        if self.p.historical:
+            self.put_notification(self.DELAYED)
+            dtend = None
+            if self.todate < float('inf'):
+                dtend = self.todate
+
+            dtbegin = None
+            if self.fromdate > float('-inf'):
+                dtbegin = self.fromdate
+
+            self.qhist = self.o.candles(
+                self.p.dataname, dtbegin, dtend,
+                self._timeframe, self._compression)
+
+            self._state = self._ST_HISTORBACK
+            return True
+
         # streaming prices returns the same queue the streamer is using.
         self.qlive = self.o.streaming_prices(self.p.dataname, tmout=tmout)
 
@@ -150,6 +176,31 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
                     self._state = self._ST_OVER
                     return False
 
+            elif self._state == self._ST_HISTORBACK:
+                msg = self.qhist.get()
+                if msg is None:  # Conn broken during historical/backfilling
+                    # Situation not managed. Simply bail out
+                    self.put_notification(self.DISCONNECTED)
+                    self._state = self._ST_OVER
+                    return False  # error management cancelled the queue
+
+                elif 'TODO' in msg:  #TODO check error Error
+                    self.put_notification(self.NOTSUBSCRIBED)
+                    self.put_notification(self.DISCONNECTED)
+                    self._state = self._ST_OVER
+                    return False
+
+                if msg:
+                    if self._load_history(msg):
+                        return True  # loading worked
+
+                    continue  # not loaded ... date may have been seen
+                else:
+                    # End of histdata
+                    if self.p.historical:  # only historical
+                        self.put_notification(self.DISCONNECTED)
+                        self._state = self._ST_OVER
+                        return False  # end of historical
             #TODO
             #   - Check for delays in feed
             #       - put a self.put_notification(self.DELAYED)
@@ -192,9 +243,7 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         # Put the prices into the bar
         #SOMETIME tick can be missing BID or OFFER.... Need to fallback
 
-
         tick = ofr if self.p.useask else bid
-
 
         self.lines.open[0] = tick
         self.lines.high[0] = tick
@@ -207,4 +256,38 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
 
     def _load_history(self, msg):
         #TODO
-        pass
+        #print(msg)
+
+        dtobj = datetime.strptime(msg['snapshotTime'], '%Y:%m:%d-%H:%M:%S')
+        dt = date2num(dtobj)
+        if dt <= self.lines.datetime[-1]:
+            return False  # time already seen
+
+        # Common fields
+        self.lines.datetime[0] = dt
+        self.lines.volume[0] = float(msg['lastTradedVolume'])
+        self.lines.openinterest[0] = 0.0
+
+        # Put the prices into the bar
+        if self.p.bidask:
+            if not self.p.useask:
+                self.lines.open[0] = float(msg['openPrice']['bid'])
+                self.lines.high[0] = float(msg['highPrice']['bid'])
+                self.lines.low[0] = float(msg['lowPrice']['bid'])
+                self.lines.close[0] = float(msg['closePrice']['bid'])
+            else:
+                self.lines.open[0] = float(msg['openPrice']['ask'])
+                self.lines.high[0] = float(msg['highPrice']['ask'])
+                self.lines.low[0] = float(msg['lowPrice']['ask'])
+                self.lines.close[0] = float(msg['closePrice']['ask'])
+        else:
+            self.lines.open[0] = ((float(msg['openPrice']['ask']) +
+                                float(msg['openPrice']['bid'])) / 2)
+            self.lines.high[0] = ((float(msg['highPrice']['ask']) +
+                                float(msg['highPrice']['bid'])) / 2)
+            self.lines.low[0] = ((float(msg['lowPrice']['ask']) +
+                                float(msg['lowPrice']['bid'])) / 2)
+            self.lines.close[0] = ((float(msg['closePrice']['ask']) +
+                                float(msg['closePrice']['bid'])) / 2)
+
+        return True

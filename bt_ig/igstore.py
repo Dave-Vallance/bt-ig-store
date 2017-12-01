@@ -30,12 +30,14 @@ import threading
 
 #Backtrader imports
 import backtrader as bt
+from backtrader import TimeFrame, date2num, num2date
 from backtrader.metabase import MetaParams
 from backtrader.utils.py3 import queue, with_metaclass
 from backtrader.utils import AutoDict
 
 
 #IG Imports
+
 from trading_ig import (IGService, IGStreamService)
 from trading_ig.lightstreamer import Subscription
 
@@ -44,8 +46,6 @@ from trading_ig.lightstreamer import Subscription
 from ...dev.trading_ig import (IGService, IGStreamService)
 from ...dev.trading_ig.lightstreamer import Subscription
 '''
-
-
 #TODO ADD Errors if appropriate
 
 
@@ -140,8 +140,25 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         bt.Order.StopLimit: 'TODO',
     }
 
-    _GRANULARITIES = 'TODO - NEEDED FOR HISTORICAL'
+    _GRANULARITIES = {
+        (bt.TimeFrame.Seconds, 1): 'SECOND',
+        (bt.TimeFrame.Minutes, 1): 'MINUTE',
+        (bt.TimeFrame.Minutes, 2): 'MINUTE_2',
+        (bt.TimeFrame.Minutes, 3): 'MINUTE_3',
+        (bt.TimeFrame.Minutes, 5): 'MINUTE_5',
+        (bt.TimeFrame.Minutes, 10): 'MINUTE_10',
+        (bt.TimeFrame.Minutes, 15): 'MINUTE_15',
+        (bt.TimeFrame.Minutes, 30): 'MINUTE_30',
+        (bt.TimeFrame.Minutes, 60): 'HOUR',
+        (bt.TimeFrame.Minutes, 120): 'HOUR_2',
+        (bt.TimeFrame.Minutes, 180): 'HOUR_3',
+        (bt.TimeFrame.Minutes, 240): 'HOUR_4',
+        (bt.TimeFrame.Days, 1): 'DAY',
+        (bt.TimeFrame.Weeks, 1): 'WEEK',
+        (bt.TimeFrame.Months, 1): 'MONTH',
+    }
 
+    _DT_FORMAT = '%Y-%m-%d %H:%M:%S'
 
     @classmethod
     def getdata(cls, *args, **kwargs):
@@ -222,13 +239,16 @@ class IGStore(with_metaclass(MetaSingleton, object)):
 
 
     def get_cash(self):
-        #TODO - Check where we
         return self._cash
 
     def get_notifications(self):
         '''Return the pending "store" notifications'''
         self.notifs.append(None)  # put a mark / threads could still append
         return [x for x in iter(self.notifs.popleft, None)]
+
+    def get_open_orders(self):
+        #TODO Return all open orders and pass them to self.pending in the order list
+        pass
 
     def get_positions(self):
         #TODO - Get postion info from returned object.
@@ -267,6 +287,59 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             self.q_ordercreate.put(None)
             self.q_orderclose.put(None)
             self.q_account.put(None)
+
+    def get_granularity(self, timeframe, compression):
+        return self._GRANULARITIES.get((timeframe, compression), None)
+
+    def candles(self, dataname, dtbegin, dtend, timeframe, compression):
+
+        kwargs = locals().copy()
+        kwargs.pop('self')
+        kwargs['q'] = q = queue.Queue()
+        t = threading.Thread(target=self._t_candles, kwargs=kwargs)
+        t.daemon = True
+        t.start()
+        return q
+
+    def _t_candles(self, dataname, dtbegin, dtend, timeframe, compression, q):
+
+        granularity = self.get_granularity(timeframe, compression)
+        if granularity is None:
+            raise ValueError('Unsupported granularity provided '
+            'please check https://labs.ig.com/rest-trading-api-reference/service-detail?id=530 '
+            'for a list of supported granularity')
+            return
+
+        dtkwargs = {}
+        if dtbegin is not None:
+            dtkwargs['start_date'] = datetime.strftime(num2date(dtbegin), format=self._DT_FORMAT)
+
+        if dtend is not None:
+            dtkwargs['end_date'] = datetime.strftime(num2date(dtend), format=self._DT_FORMAT)
+
+        try:
+            response = self.igapi.fetch_historical_prices_by_epic_and_date_range(
+                                            epic=dataname,
+                                            resolution=granularity,
+                                            **dtkwargs)
+
+            remaining = response['allowance']['remainingAllowance']
+            allowance = response['allowance']['totalAllowance']
+            next_ref = timedelta(seconds=response['allowance']['allowanceExpiry'])
+
+            print("HISTORICAL ALLOWANCE: Total: {}, Remaining: {}, Next Refresh: {}".format(
+                    allowance, remaining, next_ref))
+        except Exception as e:
+            print(e)
+            q.put(e)
+            q.put(None)
+            return
+
+        for candle in response.get('prices', []):
+            q.put(candle)
+
+        q.put({})  # end of transmission
+
 
     '''
     Loads of methods to add in-between
@@ -406,6 +479,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             try:
                 o = self.igapi.delete_working_order(oid)
             except Exception as e:
+                self.put_notification(e)
                 continue  # not cancelled - FIXME: notify
 
             self.broker._cancel(oref)
