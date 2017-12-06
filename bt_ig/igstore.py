@@ -330,8 +330,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             print("HISTORICAL ALLOWANCE: Total: {}, Remaining: {}, Next Refresh: {}".format(
                     allowance, remaining, next_ref))
         except Exception as e:
-            print(e)
-            q.put(e)
+            self.put_notification('ERROR: {}'.format(e))
             q.put(None)
             return
 
@@ -510,7 +509,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
                     o = self.igapi.create_working_order(**okwargs)
 
                 except Exception as e:
-                    print(e)
+                    #print(e)
                     self.put_notification(e)
                     self.broker._reject(oref)
                     return

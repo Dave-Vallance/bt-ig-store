@@ -36,16 +36,21 @@ Python Backtesting library for trading strategies
 - Manual pull of cash and value
 - Account cash and value live streaming
 - __*FIX:*__ Level Set during order creation caused MARKET Orders to be rejected can now all be passed as key word arguments during order creation and handled appropriately. Defaults are used where no kwarg is passed.
-- __*New:*__ Historical data download for backtesting
-- __*New:*__ Printing of remaining allowance (will later be updated to be a store notification, once notifications are working)
-- __*New:*__ Sample script for historical data download testing.
+- Historical data download for backtesting
+- Printing of remaining allowance (will later be updated to be a store notification, once notifications are working)
+- Sample script for historical data download testing.
+- __*New:*__ Store and Data notifications tested and working
+- __*New:*__ Samples updated to print Store and Data notifications
+- __*New:*__ Updated granualarity check to only make the check if Backfilling, Historical or Backfill_Start are required. This allows you to work with any timeframe using tick data for live trading only.
+
+NOTE: Backfilling and Backfill_Start are not yet supported. The check mentioned above is in preparation for those features being supported. 
 
 ### Important!  
 To use historical data, you will need to use the forked trading_ig API from my profile.
 
 If you do not, you will receive a `ValueError` when requesting historical data. A
 pull request has been submitted to the official project and this warning will be
-removed if/when it is accepted. 
+removed if/when it is accepted.
 
 ## Known Issues
 
@@ -134,9 +139,16 @@ class IGTest(bt.Strategy):
             self.env.runstop()
 
 
+    ## NOTIFICATIONS
     def notify_order(self,order):
         if order.status == order.Rejected:
             print('Order Rejected')
+
+    def notify_data(self, data, status, *args, **kwargs):
+        print('DATA NOTIF: {}: {}'.format(data._getstatusname(status), ','.join(args)))
+
+    def notify_store(self, msg, *args, **kwargs):
+        print('STORE NOTIF: {}'.format(msg))
 
 
 #Logging - Uncomment to see ig_trading library logs
@@ -167,6 +179,7 @@ cerebro.addstrategy(IGTest)
 
 # Run over everything
 cerebro.run()
+
 ```
 
 ## Historical Data Example
@@ -199,9 +212,16 @@ class IGTest(bt.Strategy):
                         self.data.high[0],self.data.low[0],self.data.close[0]))
 
 
+    ## NOTIFICATIONS
     def notify_order(self,order):
         if order.status == order.Rejected:
             print('Order Rejected')
+
+    def notify_data(self, data, status, *args, **kwargs):
+        print('DATA NOTIF: {}: {}'.format(data._getstatusname(status), ','.join(args)))
+
+    def notify_store(self, msg, *args, **kwargs):
+        print('STORE NOTIF: {}'.format(msg))
 
 #Logging - Uncomment to see ig_trading library logs
 #logging.basicConfig(level=logging.DEBUG)
@@ -232,4 +252,5 @@ cerebro.addstrategy(IGTest)
 
 # Run over everything
 cerebro.run()
+
 ```

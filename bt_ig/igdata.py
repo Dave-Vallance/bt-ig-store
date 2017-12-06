@@ -30,6 +30,8 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         ('historical', False),
         ('useask', False),
         ('bidask', True),
+        ('backfill_start', False),  # do backfilling at the start
+        ('backfill', False),  # do backfilling when reconnecting
         ('reconnections', -1),
         ('qcheck', 5)
     )
@@ -69,11 +71,12 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         self.o.start(data=self)
 
         # check if the granularity is supported
-        otf = self.o.get_granularity(self._timeframe, self._compression)
-        if otf is None:
-            self.put_notification(self.NOTSUPPORTED_TF)
-            self._state = self._ST_OVER
-            return
+        if self.p.historical or self.p.backfill or self.p.backfill_start:
+            otf = self.o.get_granularity(self._timeframe, self._compression)
+            if otf is None:
+                self.put_notification(self.NOTSUPPORTED_TF)
+                self._state = self._ST_OVER
+                return
 
         self._start_finish()
         self._state = self._ST_START  # initial state for _load
@@ -183,12 +186,6 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
                     self.put_notification(self.DISCONNECTED)
                     self._state = self._ST_OVER
                     return False  # error management cancelled the queue
-
-                elif 'TODO' in msg:  #TODO check error Error
-                    self.put_notification(self.NOTSUBSCRIBED)
-                    self.put_notification(self.DISCONNECTED)
-                    self._state = self._ST_OVER
-                    return False
 
                 if msg:
                     if self._load_history(msg):

@@ -73,9 +73,16 @@ class IGTest(bt.Strategy):
             self.env.runstop()
 
 
+    ## NOTIFICATIONS
     def notify_order(self,order):
         if order.status == order.Rejected:
             print('Order Rejected')
+
+    def notify_data(self, data, status, *args, **kwargs):
+        print('DATA NOTIF: {}: {}'.format(data._getstatusname(status), ','.join(args)))
+
+    def notify_store(self, msg, *args, **kwargs):
+        print('STORE NOTIF: {}'.format(msg))
 
 
 #Logging - Uncomment to see ig_trading library logs
