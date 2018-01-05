@@ -39,11 +39,13 @@ Python Backtesting library for trading strategies
 - Historical data download for backtesting
 - Printing of remaining allowance (will later be updated to be a store notification, once notifications are working)
 - Sample script for historical data download testing.
-- __*New:*__ Store and Data notifications tested and working
-- __*New:*__ Samples updated to print Store and Data notifications
-- __*New:*__ Updated granualarity check to only make the check if Backfilling, Historical or Backfill_Start are required. This allows you to work with any timeframe using tick data for live trading only.
+- Store and Data notifications tested and working
+- Samples updated to print Store and Data notifications
+- Updated granualarity check to only make the check if Backfilling, Historical or Backfill_Start are required. This allows you to work with any timeframe using tick data for live trading only.
+- __*New:*__ Backfilling from start now supported
+- __*New:*__ Parameter `backfill_bars` allows you to set how many bars to backfill from the start. Since the IG api places restrictions on the number of historical data points a user can download per week, this parameter allows a user to limit the amount of historical data downloaded to only the required amount.  
 
-NOTE: Backfilling and Backfill_Start are not yet supported. The check mentioned above is in preparation for those features being supported. 
+NOTE: Backfilling is not yet supported. The check mentioned above is in preparation for those features being supported.
 
 ### Important!  
 To use historical data, you will need to use the forked trading_ig API from my profile.
@@ -80,76 +82,79 @@ class IGTest(bt.Strategy):
     '''
     Simple strat to test IGStore.
     '''
+
     def __init__(self):
-        pass
+        self._live = False #Track whether we have live data to avoid entering on backfill
+        self._last_hist_bar = None #To track the last delivered historical bar
 
     def next(self):
         dt = self.datetime.datetime()
         bar = len(self)
+        lhst = self._last_hist_bar
         print('{}: O: {} H: {} L: {} C:{}'.format(dt, self.data.open[0],
                         self.data.high[0],self.data.low[0],self.data.close[0]))
+        if self._live:
+            if bar == lhst + 1:
+                print('Testing Get Cash!')
+                cash = self.broker.getcash()
+                print("Current Cash: {}".format(cash))
 
+                print('Testing Get Value!')
+                value = self.broker.getvalue()
+                print("Current Value: {}".format(value))
 
-        if bar == 1:
-            print('Testing Get Cash!')
-            cash = self.broker.getcash()
-            print("Current Cash: {}".format(cash))
+            if bar == lhst + 2:
+                print('Testing Simple Order!')
+                pos = self.broker.getposition(self.data)
+                self.buy(size=5)
+            if bar == lhst + 3:
+                print('Closing Order')
+                pos = self.broker.getposition(self.data)
+                print('Open Position Size = {}'.format(pos.size))
+                cOrd = self.close()
+                print('Closing Order Size = {}'.format(cOrd.size))
 
-            print('Testing Get Value!')
-            value = self.broker.getvalue()
-            print("Current Value: {}".format(value))
+                # CHECK CASH AND EQUITY ARE AUTMATICALLY BEING UPDATED
+                cash = self.broker.getcash()
+                value = self.broker.getvalue()
+                print("Current Cash: {}".format(cash))
+                print("Current Value: {}".format(value))
 
-        if bar == 2:
-            print('Testing Simple Order!')
-            pos = self.broker.getposition(self.data)
-            self.buy(size=5)
-        if bar == 3:
-            print('Closing Order')
-            pos = self.broker.getposition(self.data)
-            print('Open Position Size = {}'.format(pos.size))
-            cOrd = self.close()
-            print('Closing Order Size = {}'.format(cOrd.size))
+            if bar == lhst +4:
+                print('Testing Limit Order')
+                limit_price = self.data.close[0] * 0.9 #Buy better price 10% lower
+                self.limit_ord = self.buy(exectype=bt.Order.Limit, price=limit_price, size=5)
 
-            # CHECK CASH AND EQUITY ARE AUTMATICALLY BEING UPDATED
-            cash = self.broker.getcash()
-            value = self.broker.getvalue()
-            print("Current Cash: {}".format(cash))
-            print("Current Value: {}".format(value))
+            if bar == lhst + 5:
+                print('Cancelling Limit Order')
+                self.cancel(self.limit_ord)
 
-        if bar == 4:
-            print('Testing Limit Order')
-            limit_price = self.data.close[0] * 0.9 #Buy better price 10% lower
-            self.limit_ord = self.buy(exectype=bt.Order.Limit, price=limit_price, size=5)
+            if bar == lhst + 6:
+                print('Testing Stop Order')
+                stop_price = self.data.close[0] * 0.9 #buy at a worse price 10% lower
+                self.stop_ord = self.buy(exectype=bt.Order.Limit, price=stop_price, size=5)
 
-        if bar == 5:
-            print('Cancelling Limit Order')
-            self.cancel(self.limit_ord)
+            if bar == lhst + 7:
+                print('Cancelling Stop Order')
+                self.cancel(self.stop_ord)
 
-        if bar ==6:
-            print('Testing Stop Order')
-            stop_price = self.data.close[0] * 0.9 #buy at a worse price 10% lower
-            self.stop_ord = self.buy(exectype=bt.Order.Limit, price=stop_price, size=5)
-
-        if bar == 7:
-            print('Cancelling Stop Order')
-            self.cancel(self.stop_ord)
-
-        if bar == 8:
-            print("Test Finished")
-            self.env.runstop()
-
+            if bar == lhst + 8:
+                print("Test Finished")
+                self.env.runstop()
 
     ## NOTIFICATIONS
     def notify_order(self,order):
         if order.status == order.Rejected:
-            print('Order Rejected')
+            print('ORDER NOTIF: Order Rejected')
 
     def notify_data(self, data, status, *args, **kwargs):
         print('DATA NOTIF: {}: {}'.format(data._getstatusname(status), ','.join(args)))
+        if status == data.LIVE:
+            self._live = True
+            self._last_hist_bar = len(self)
 
     def notify_store(self, msg, *args, **kwargs):
         print('STORE NOTIF: {}'.format(msg))
-
 
 #Logging - Uncomment to see ig_trading library logs
 #logging.basicConfig(level=logging.DEBUG)
@@ -170,9 +175,10 @@ broker = igs.getbroker()
 cerebro.setbroker(broker)
 
 
-data = igs.getdata(dataname='CS.D.GBPUSD.TODAY.IP')
+data = igs.getdata(dataname='CS.D.GBPUSD.TODAY.IP', backfill_start=True, backfill_bars=50)
 #Replay the data in forward test envirnoment so we can act quicker
-cerebro.resampledata(data, timeframe=tframes['seconds'], compression=15, name='GBP_USD')
+#cerebro.resampledata(data, timeframe=tframes['seconds'], compression=15, name='GBP_USD')
+cerebro.resampledata(data, timeframe=tframes['minutes'], compression=1, name='GBP_USD')
 
 #Add our strategy
 cerebro.addstrategy(IGTest)

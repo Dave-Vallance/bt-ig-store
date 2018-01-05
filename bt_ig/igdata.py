@@ -31,6 +31,7 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         ('useask', False),
         ('bidask', True),
         ('backfill_start', False),  # do backfilling at the start
+        ('backfill_bars', 0), #number of bars to backfill to avoid using too much allowance
         ('backfill', False),  # do backfilling when reconnecting
         ('reconnections', -1),
         ('qcheck', 5)
@@ -105,6 +106,11 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         # streaming prices returns the same queue the streamer is using.
         self.qlive = self.o.streaming_prices(self.p.dataname, tmout=tmout)
 
+        if instart:
+            self._statelivereconn = self.p.backfill_start
+        else:
+            self._statelivereconn = self.p.backfill
+
         if self._statelivereconn:
             self.put_notification(self.DELAYED)
 
@@ -171,13 +177,36 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
                     if ret:
                         return True
 
+
                     # could not load bar ... go and get new one
                     continue
 
-            elif self._state == self._ST_START:
-                if not self._st_start(instart=False):
-                    self._state = self._ST_OVER
-                    return False
+                dtend = None
+                if len(self) > 1:
+                    # len == 1 ... forwarded for the 1st time
+                    dtbegin = self.datetime.datetime(-1)
+                elif self.fromdate > float('-inf'):
+                    dtbegin = num2date(self.fromdate)
+                else:  # 1st bar and no begin set
+                    # passing None to fetch max possible in 1 request
+                    dtbegin = None
+
+                if dtbegin:
+                    dtend = datetime.utcfromtimestamp(int(msg['time']) / 10 ** 6)
+
+                    self.qhist = self.o.candles(
+                        self.p.dataname, dtbegin, dtend,
+                        self._timeframe, self._compression)
+                else:
+                    self.qhist = self.o.candles(self.p.dataname, dtbegin, dtend,
+                    self._timeframe, self._compression, numpoints=True, bars=self.p.backfill_bars)
+
+                self._state = self._ST_HISTORBACK
+                self._statelivereconn = False  # no longer in live
+
+                continue
+
+
 
             elif self._state == self._ST_HISTORBACK:
                 msg = self.qhist.get()
@@ -198,6 +227,15 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
                         self.put_notification(self.DISCONNECTED)
                         self._state = self._ST_OVER
                         return False  # end of historical
+
+                # Live is also wished - go for it
+                self._state = self._ST_LIVE
+                continue
+
+            elif self._state == self._ST_START:
+                if not self._st_start(instart=False):
+                    self._state = self._ST_OVER
+                    return False
             #TODO
             #   - Check for delays in feed
             #       - put a self.put_notification(self.DELAYED)

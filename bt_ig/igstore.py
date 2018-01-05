@@ -37,7 +37,6 @@ from backtrader.utils import AutoDict
 
 
 #IG Imports
-
 from trading_ig import (IGService, IGStreamService)
 from trading_ig.lightstreamer import Subscription
 
@@ -291,7 +290,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
     def get_granularity(self, timeframe, compression):
         return self._GRANULARITIES.get((timeframe, compression), None)
 
-    def candles(self, dataname, dtbegin, dtend, timeframe, compression):
+    def candles(self, dataname, dtbegin, dtend, timeframe, compression, numpoints=False, bars=None):
 
         kwargs = locals().copy()
         kwargs.pop('self')
@@ -301,7 +300,7 @@ class IGStore(with_metaclass(MetaSingleton, object)):
         t.start()
         return q
 
-    def _t_candles(self, dataname, dtbegin, dtend, timeframe, compression, q):
+    def _t_candles(self, dataname, dtbegin, dtend, timeframe, compression, q, numpoints=False, bars=None):
 
         granularity = self.get_granularity(timeframe, compression)
         if granularity is None:
@@ -318,10 +317,16 @@ class IGStore(with_metaclass(MetaSingleton, object)):
             dtkwargs['end_date'] = datetime.strftime(num2date(dtend), format=self._DT_FORMAT)
 
         try:
-            response = self.igapi.fetch_historical_prices_by_epic_and_date_range(
-                                            epic=dataname,
-                                            resolution=granularity,
-                                            **dtkwargs)
+            if numpoints:
+                response = self.igapi.fetch_historical_prices_by_epic_and_num_points(
+                                                epic=dataname,
+                                                resolution=granularity,
+                                                numpoints=bars)
+            else:
+                response = self.igapi.fetch_historical_prices_by_epic_and_date_range(
+                                                epic=dataname,
+                                                resolution=granularity,
+                                                **dtkwargs)
 
             remaining = response['allowance']['remainingAllowance']
             allowance = response['allowance']['totalAllowance']

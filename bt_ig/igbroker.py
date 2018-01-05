@@ -34,8 +34,6 @@ class MetaIGBroker(BrokerBase.__class__):
         super(MetaIGBroker, cls).__init__(name, bases, dct)
         igstore.IGStore.BrokerCls = cls
 
-
-
 class IGBroker(with_metaclass(MetaIGBroker, BrokerBase)):
     '''Broker implementation for IG.
     This class maps the orders/positions from IG to the
@@ -83,7 +81,6 @@ class IGBroker(with_metaclass(MetaIGBroker, BrokerBase)):
                     size = -size
                 price = p['position']['openLevel']
                 self.positions[p['market']['epic']] = Position(size, price)
-
 
     def data_started(self, data):
         pos = self.getposition(data)
