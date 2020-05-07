@@ -296,6 +296,7 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
         local_tz = pytz.timezone('Europe/London')
         dtobj = datetime.strptime(msg['snapshotTime'], '%Y:%m:%d-%H:%M:%S')
         dtobj = local_tz.localize(dtobj).astimezone(pytz.utc)
+        dt = date2num(dtobj)
         if dt <= self.lines.datetime[-1]:
             return False  # time already seen
 
