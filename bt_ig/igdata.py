@@ -2,7 +2,7 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 from datetime import datetime, timedelta
-
+import pytz, logging
 from backtrader.feed import DataBase
 from backtrader import TimeFrame, date2num, num2date
 from backtrader.utils.py3 import (integer_types, queue, string_types,
@@ -292,9 +292,10 @@ class IGData(with_metaclass(MetaIGData, DataBase)):
     def _load_history(self, msg):
         #TODO
         #print(msg)
-
+        logging.debug(msg)
+        local_tz = pytz.timezone('Europe/London')
         dtobj = datetime.strptime(msg['snapshotTime'], '%Y:%m:%d-%H:%M:%S')
-        dt = date2num(dtobj)
+        dtobj = local_tz.localize(dtobj).astimezone(pytz.utc)
         if dt <= self.lines.datetime[-1]:
             return False  # time already seen
 
